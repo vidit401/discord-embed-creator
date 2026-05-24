@@ -346,7 +346,11 @@ if (!trimmed) return "";
 const known = resolveKnownExpression(trimmed);
 if (known !== undefined) return String(known);
 
-if (trimmed[0] === '"' && trimmed[trimmed.length - 1] === '"') {
+if (
+trimmed.length >= 2 &&
+trimmed[0] === '"' &&
+trimmed[trimmed.length - 1] === '"'
+) {
 try {
 return JSON.parse(trimmed);
 } catch {
@@ -354,11 +358,19 @@ return trimmed.slice(1, -1);
 }
 }
 
-if (trimmed[0] === "'" && trimmed[trimmed.length - 1] === "'") {
+if (
+trimmed.length >= 2 &&
+trimmed[0] === "'" &&
+trimmed[trimmed.length - 1] === "'"
+) {
 return trimmed.slice(1, -1).replace(/\\'/g, "'").replace(/\\\\/g, "\\");
 }
 
-if (trimmed[0] === "`" && trimmed[trimmed.length - 1] === "`") {
+if (
+trimmed.length >= 2 &&
+trimmed[0] === "`" &&
+trimmed[trimmed.length - 1] === "`"
+) {
 const body = trimmed.slice(1, -1);
 return body.replace(/\$\{([^}]+)\}/g, (_, expression: string) => {
 const knownValue = resolveKnownExpression(expression.trim());
@@ -755,7 +767,7 @@ const editableWithPreview = language === "json" || language === "js";
 useEffect(() => {
 setEditorValue(output);
 setEditorError("");
-}, [output, language, jsVersion, jsMode, rsMode, rsFields]);
+}, [embed, output, language, jsVersion, jsMode, rsMode, rsFields]);
 
 function updateFromJson(value: string) {
 try {
