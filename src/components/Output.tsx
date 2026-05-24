@@ -776,7 +776,7 @@ setEditorError("");
 } catch (error) {
 setEditorError(
 `Invalid JSON: ${
-error instanceof Error ? error.message : "fix syntax to update preview."
+error instanceof Error ? error.message : "Fix syntax to update preview."
 }`
 );
 }
@@ -789,7 +789,7 @@ setEditorError("");
 } catch (error) {
 setEditorError(
 `Invalid discord.js snippet: ${
-error instanceof Error ? error.message : "keep editing to update preview."
+error instanceof Error ? error.message : "Keep editing to update preview."
 }`
 );
 }
