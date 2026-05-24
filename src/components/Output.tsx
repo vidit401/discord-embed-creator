@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { Embed, EmbedField } from "../lib/interfaces";
 import { embedToObjectCode } from "../lib/utils";
@@ -142,154 +142,372 @@ fields: normalizeFields(source.fields)
 };
 }
 
-class MockEmbedBuilder {
-data: Record<string, unknown> = {};
+function findMatchingDelimiter(
+input: string,
+openIndex: number,
+openChar: "(" | "{" | "[",
+closeChar: ")" | "}" | "]"
+): number {
+let depth = 0;
+let quote: "'" | '"' | "`" | null = null;
+let escape = false;
 
-setAuthor(nameOrAuthor: unknown, iconURL?: unknown, url?: unknown) {
-if (nameOrAuthor && typeof nameOrAuthor === "object") {
-this.data.author = {
-...(this.data.author as Record<string, unknown>),
-...(nameOrAuthor as Record<string, unknown>)
+for (let i = openIndex; i < input.length; i++) {
+const char = input[i];
+
+if (quote) {
+if (escape) {
+escape = false;
+continue;
+}
+if (char === "\\") {
+escape = true;
+continue;
+}
+if (char === quote) {
+quote = null;
+}
+continue;
+}
+
+if (char === "'" || char === '"' || char === "`") {
+quote = char;
+continue;
+}
+
+if (char === openChar) depth++;
+if (char === closeChar) depth--;
+
+if (depth === 0) return i;
+}
+
+return -1;
+}
+
+function splitTopLevelArgs(input: string): string[] {
+const parts: string[] = [];
+let start = 0;
+let paren = 0;
+let brace = 0;
+let bracket = 0;
+let quote: "'" | '"' | "`" | null = null;
+let escape = false;
+
+for (let i = 0; i < input.length; i++) {
+const char = input[i];
+
+if (quote) {
+if (escape) {
+escape = false;
+continue;
+}
+if (char === "\\") {
+escape = true;
+continue;
+}
+if (char === quote) quote = null;
+continue;
+}
+
+if (char === "'" || char === '"' || char === "`") {
+quote = char;
+continue;
+}
+
+if (char === "(") paren++;
+else if (char === ")") paren--;
+else if (char === "{") brace++;
+else if (char === "}") brace--;
+else if (char === "[") bracket++;
+else if (char === "]") bracket--;
+else if (char === "," && paren === 0 && brace === 0 && bracket === 0) {
+parts.push(input.slice(start, i).trim());
+start = i + 1;
+}
+}
+
+const last = input.slice(start).trim();
+if (last) parts.push(last);
+return parts;
+}
+
+function findMethodCalls(code: string, methodName: string): string[] {
+const calls: string[] = [];
+let start = 0;
+const signature = `${methodName}(`;
+
+while (true) {
+const index = code.indexOf(signature, start);
+if (index === -1) break;
+
+const openIndex = index + signature.length - 1;
+const closeIndex = findMatchingDelimiter(code, openIndex, "(", ")");
+if (closeIndex === -1) break;
+
+calls.push(code.slice(openIndex + 1, closeIndex).trim());
+start = closeIndex + 1;
+}
+
+return calls;
+}
+
+function extractObjectLiterals(input: string): string[] {
+const objects: string[] = [];
+let i = 0;
+
+while (i < input.length) {
+if (input[i] !== "{") {
+i++;
+continue;
+}
+
+const end = findMatchingDelimiter(input, i, "{", "}");
+if (end === -1) break;
+objects.push(input.slice(i, end + 1));
+i = end + 1;
+}
+
+return objects;
+}
+
+function extractPropertyValue(objectCode: string, key: string): string | undefined {
+const regex = new RegExp(`\\b${key}\\s*:`, "g");
+const match = regex.exec(objectCode);
+if (!match) return undefined;
+
+let i = match.index + match[0].length;
+while (i < objectCode.length && /\s/.test(objectCode[i])) i++;
+
+let paren = 0;
+let brace = 0;
+let bracket = 0;
+let quote: "'" | '"' | "`" | null = null;
+let escape = false;
+let end = i;
+
+for (; end < objectCode.length; end++) {
+const char = objectCode[end];
+
+if (quote) {
+if (escape) {
+escape = false;
+continue;
+}
+if (char === "\\") {
+escape = true;
+continue;
+}
+if (char === quote) quote = null;
+continue;
+}
+
+if (char === "'" || char === '"' || char === "`") {
+quote = char;
+continue;
+}
+
+if (char === "(") paren++;
+else if (char === ")") paren--;
+else if (char === "{") brace++;
+else if (char === "}") {
+if (brace === 0 && paren === 0 && bracket === 0) break;
+brace--;
+}
+else if (char === "[") bracket++;
+else if (char === "]") bracket--;
+else if (char === "," && paren === 0 && brace === 0 && bracket === 0) break;
+}
+
+return objectCode.slice(i, end).trim();
+}
+
+function resolveKnownExpression(value: string): string | number | undefined {
+const compact = value.replace(/\s+/g, "");
+if (compact === "guild.memberCount") return sampleGuild.memberCount;
+if (compact === "guild.premiumSubscriptionCount")
+return sampleGuild.premiumSubscriptionCount;
+if (compact === "guild.createdTimestamp") return sampleGuild.createdTimestamp;
+if (compact === "Math.floor(guild.createdTimestamp/1000)") {
+return Math.floor(sampleGuild.createdTimestamp / 1000);
+}
+if (/^guild\.iconURL\(\{.*\}\)$/.test(compact)) {
+const sizeMatch = compact.match(/size:(\d+)/);
+const size = sizeMatch ? Number(sizeMatch[1]) : 128;
+return sampleGuild.iconURL({ size });
+}
+return undefined;
+}
+
+function parseExpressionValue(value: string): string {
+const trimmed = value.trim();
+if (!trimmed) return "";
+
+const known = resolveKnownExpression(trimmed);
+if (known !== undefined) return String(known);
+
+if (trimmed[0] === '"' && trimmed[trimmed.length - 1] === '"') {
+try {
+return JSON.parse(trimmed);
+} catch {
+return trimmed.slice(1, -1);
+}
+}
+
+if (trimmed[0] === "'" && trimmed[trimmed.length - 1] === "'") {
+return trimmed.slice(1, -1).replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+}
+
+if (trimmed[0] === "`" && trimmed[trimmed.length - 1] === "`") {
+const body = trimmed.slice(1, -1);
+return body.replace(/\$\{([^}]+)\}/g, (_, expression: string) => {
+const knownValue = resolveKnownExpression(expression.trim());
+return knownValue === undefined ? "" : String(knownValue);
+});
+}
+
+if (/^(true|false)$/i.test(trimmed)) return trimmed.toLowerCase();
+if (!Number.isNaN(Number(trimmed))) return String(Number(trimmed));
+
+return trimmed;
+}
+
+function parseObjectModeEmbed(code: string): Embed | undefined {
+const embedsIndex = code.indexOf("embeds");
+if (embedsIndex === -1) return undefined;
+const bracketIndex = code.indexOf("[", embedsIndex);
+if (bracketIndex === -1) return undefined;
+const objectStart = code.indexOf("{", bracketIndex);
+if (objectStart === -1) return undefined;
+const objectEnd = findMatchingDelimiter(code, objectStart, "{", "}");
+if (objectEnd === -1) return undefined;
+
+const objectCode = code.slice(objectStart, objectEnd + 1);
+const normalizedJson = objectCode
+.replace(/([{\[,]\s*)([A-Za-z_]\w*)\s*:/g, '$1"$2":')
+.replace(/,(\s*[}\]])/g, "$1");
+
+try {
+return normalizeEmbed(JSON.parse(normalizedJson));
+} catch {
+return undefined;
+}
+}
+
+function parseDiscordJs(code: string): Embed {
+const parsedObjectMode = parseObjectModeEmbed(code);
+if (parsedObjectMode) return parsedObjectMode;
+
+const partial: Record<string, unknown> = { fields: [] };
+
+const authorCalls = findMethodCalls(code, "setAuthor");
+if (authorCalls.length) {
+const call = authorCalls[authorCalls.length - 1];
+if (call.trim().startsWith("{")) {
+const name = extractPropertyValue(call, "name");
+const url = extractPropertyValue(call, "url");
+const iconURL = extractPropertyValue(call, "iconURL");
+partial.author = {
+name: name ? parseExpressionValue(name) : "",
+url: url ? parseExpressionValue(url) : "",
+iconURL: iconURL ? parseExpressionValue(iconURL) : ""
 };
 } else {
-this.data.author = {
-name: nameOrAuthor,
-iconURL,
-url
+const args = splitTopLevelArgs(call);
+partial.author = {
+name: parseExpressionValue(args[0] ?? ""),
+iconURL: parseExpressionValue(args[1] ?? ""),
+url: parseExpressionValue(args[2] ?? "")
 };
 }
-return this;
 }
 
-setTitle(title: unknown) {
-this.data.title = title;
-return this;
+const titleCalls = findMethodCalls(code, "setTitle");
+if (titleCalls.length) partial.title = parseExpressionValue(titleCalls[titleCalls.length - 1]);
+
+const urlCalls = findMethodCalls(code, "setURL");
+if (urlCalls.length) partial.url = parseExpressionValue(urlCalls[urlCalls.length - 1]);
+
+const descriptionCalls = findMethodCalls(code, "setDescription");
+if (descriptionCalls.length) {
+partial.description = parseExpressionValue(
+descriptionCalls[descriptionCalls.length - 1]
+);
 }
 
-setURL(url: unknown) {
-this.data.url = url;
-return this;
+const imageCalls = findMethodCalls(code, "setImage");
+if (imageCalls.length) partial.image = parseExpressionValue(imageCalls[imageCalls.length - 1]);
+
+const thumbnailCalls = findMethodCalls(code, "setThumbnail");
+if (thumbnailCalls.length) {
+partial.thumbnail = parseExpressionValue(thumbnailCalls[thumbnailCalls.length - 1]);
 }
 
-setDescription(description: unknown) {
-this.data.description = description;
-return this;
-}
+const colorCalls = findMethodCalls(code, "setColor");
+if (colorCalls.length) partial.color = parseExpressionValue(colorCalls[colorCalls.length - 1]);
 
-addField(name: unknown, value: unknown, inline?: unknown) {
-const fields = (this.data.fields as unknown[]) || [];
-fields.push({ name, value, inline: !!inline });
-this.data.fields = fields;
-return this;
-}
-
-addFields(...fields: unknown[]) {
-const existing = (this.data.fields as unknown[]) || [];
-const normalized: unknown[] = [];
-for (const field of fields) {
-if (Array.isArray(field)) normalized.push(...field);
-else normalized.push(field);
-}
-this.data.fields = [...existing, ...normalized];
-return this;
-}
-
-setImage(image: unknown) {
-this.data.image = image;
-return this;
-}
-
-setThumbnail(thumbnail: unknown) {
-this.data.thumbnail = thumbnail;
-return this;
-}
-
-setColor(color: unknown) {
-this.data.color = color;
-return this;
-}
-
-setFooter(textOrFooter: unknown, iconURL?: unknown) {
-if (textOrFooter && typeof textOrFooter === "object") {
-this.data.footer = {
-...(this.data.footer as Record<string, unknown>),
-...(textOrFooter as Record<string, unknown>)
+const footerCalls = findMethodCalls(code, "setFooter");
+if (footerCalls.length) {
+const call = footerCalls[footerCalls.length - 1];
+if (call.trim().startsWith("{")) {
+const text = extractPropertyValue(call, "text");
+const iconURL = extractPropertyValue(call, "iconURL");
+partial.footer = {
+text: text ? parseExpressionValue(text) : "",
+iconURL: iconURL ? parseExpressionValue(iconURL) : ""
 };
 } else {
-this.data.footer = { text: textOrFooter, iconURL };
-}
-return this;
-}
-
-setTimestamp(timestamp?: unknown) {
-this.data.timestamp = timestamp === undefined ? Date.now() : timestamp;
-return this;
-}
-
-toJSON() {
-return this.data;
-}
-}
-
-async function parseDiscordJs(code: string): Promise<Embed> {
-const AsyncFunction: new (...args: string[]) => (
-...args: unknown[]
-) => Promise<unknown> = Object.getPrototypeOf(async function () {})
-.constructor;
-
-let repliedEmbed: unknown;
-
-const runner = new AsyncFunction(
-"defaultEmbed",
-"EmbedBuilder",
-"MessageEmbed",
-"guild",
-"message",
-"Math",
-"window",
-"document",
-"globalThis",
-"fetch",
-`${code}\nreturn typeof embed !== \"undefined\" ? embed : undefined;`
-);
-
-const message = {
-reply: async (value: unknown) => {
-if (
-value &&
-typeof value === "object" &&
-"embeds" in value &&
-Array.isArray((value as { embeds?: unknown[] }).embeds)
-) {
-repliedEmbed = (value as { embeds: unknown[] }).embeds[0];
-}
-return value;
-}
+const args = splitTopLevelArgs(call);
+partial.footer = {
+text: parseExpressionValue(args[0] ?? ""),
+iconURL: parseExpressionValue(args[1] ?? "")
 };
-
-const result = await runner(
-() => new MockEmbedBuilder(),
-MockEmbedBuilder,
-MockEmbedBuilder,
-sampleGuild,
-message,
-Math,
-undefined,
-undefined,
-undefined,
-undefined
-);
-
-const embedSource =
-result && typeof result === "object" && "toJSON" in result
-? (result as { toJSON: () => unknown }).toJSON()
-: result || repliedEmbed;
-
-if (!embedSource) {
-throw new Error("No embed variable found in code.");
+}
 }
 
-return normalizeEmbed(embedSource);
+const addFieldsCalls = findMethodCalls(code, "addFields");
+for (const call of addFieldsCalls) {
+const objects = extractObjectLiterals(call);
+const fields = (partial.fields as unknown[]) || [];
+for (const objectCode of objects) {
+const name = extractPropertyValue(objectCode, "name");
+const value = extractPropertyValue(objectCode, "value");
+const inline = extractPropertyValue(objectCode, "inline");
+fields.push({
+name: parseExpressionValue(name ?? ""),
+value: parseExpressionValue(value ?? ""),
+inline: (inline ?? "").trim() === "true"
+});
+}
+partial.fields = fields;
+}
+
+const addFieldCalls = findMethodCalls(code, "addField");
+for (const call of addFieldCalls) {
+const args = splitTopLevelArgs(call);
+const fields = (partial.fields as unknown[]) || [];
+fields.push({
+name: parseExpressionValue(args[0] ?? ""),
+value: parseExpressionValue(args[1] ?? ""),
+inline: (args[2] ?? "").trim() === "true"
+});
+partial.fields = fields;
+}
+
+if (findMethodCalls(code, "setTimestamp").length) {
+partial.timestamp = Date.now();
+}
+
+const hasEmbedData =
+Object.keys(partial).length > 1 ||
+findMethodCalls(code, "setTimestamp").length > 0;
+
+if (!hasEmbedData) {
+throw new Error(
+"Expected embed builder methods like setTitle/setDescription/addFields, or an embeds object."
+);
+}
+
+return normalizeEmbed(partial);
 }
 
 function generateOutput(
@@ -528,7 +746,6 @@ const [rsMode, setRsMode] = useState("variable");
 const [rsFields, setRsFields] = useState("together");
 const [editorValue, setEditorValue] = useState("");
 const [editorError, setEditorError] = useState("");
-const parseVersion = useRef(0);
 
 const output = generateOutput(embed, language, jsVersion, jsMode, rsMode, rsFields);
 const editableWithPreview = language === "json" || language === "js";
@@ -548,20 +765,14 @@ setEditorError("Invalid JSON. Fix syntax to update preview.");
 }
 
 function updateFromJs(value: string) {
-const current = ++parseVersion.current;
-
-void parseDiscordJs(value)
-.then(parsed => {
-if (parseVersion.current !== current) return;
-onEmbedChange(parsed);
+try {
+onEmbedChange(parseDiscordJs(value));
 setEditorError("");
-})
-.catch(() => {
-if (parseVersion.current !== current) return;
+} catch {
 setEditorError(
 "Invalid discord.js snippet. Keep editing to update preview."
 );
-});
+}
 }
 
 return (

@@ -31,13 +31,16 @@ function setAllDetails(open: boolean) {
 	}
 }
 
+const DAY_IN_MS = 86_400_000;
+const randomSeed = () => Math.floor(Math.random() * 1_000_000);
+const randomImage = (name: string, width: number, height: number) =>
+	`https://picsum.photos/seed/${name}-${randomSeed()}/${width}/${height}`;
+
 const infoEmbed: Embed = {
 	author: {
 		name: "Server Stats",
 		url: "",
-		iconUrl: `https://picsum.photos/seed/guild-author-${Math.floor(
-			Math.random() * 1000000
-		)}/64/64`
+		iconUrl: randomImage("guild-author", 64, 64)
 	},
 	title: "",
 	url: "",
@@ -58,18 +61,14 @@ const infoEmbed: Embed = {
 			name: "Created",
 			value: `<t:${Math.floor(
 				(Date.now() -
-					(Math.floor(Math.random() * 2200) + 200) * 86400000) /
+					(Math.floor(Math.random() * 2200) + 200) * DAY_IN_MS) /
 					1000
 			)}:D>`,
 			inline: true
 		}
 	],
-	image: `https://picsum.photos/seed/guild-banner-${Math.floor(
-		Math.random() * 1000000
-	)}/640/256`,
-	thumbnail: `https://picsum.photos/seed/guild-thumb-${Math.floor(
-		Math.random() * 1000000
-	)}/128/128`,
+	image: randomImage("guild-banner", 640, 256),
+	thumbnail: randomImage("guild-thumb", 128, 128),
 	footer: {
 		text: "",
 		iconUrl: ""
