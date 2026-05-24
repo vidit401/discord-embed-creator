@@ -21,8 +21,9 @@ const sampleGuild = (() => {
 const seed = Math.floor(Math.random() * 1000000);
 const memberCount = Math.floor(Math.random() * 90000) + 1000;
 const premiumSubscriptionCount = Math.floor(Math.random() * 180) + 1;
+const DAY_IN_MS = 86_400_000;
 const createdTimestamp =
-Date.now() - (Math.floor(Math.random() * 2200) + 200) * 86400000;
+Date.now() - (Math.floor(Math.random() * 2200) + 200) * DAY_IN_MS;
 
 return {
 memberCount,
@@ -382,6 +383,7 @@ const objectEnd = findMatchingDelimiter(code, objectStart, "{", "}");
 if (objectEnd === -1) return undefined;
 
 const objectCode = code.slice(objectStart, objectEnd + 1);
+// This is intentionally scoped to this app's generated object output format.
 const normalizedJson = objectCode
 .replace(/([{\[,]\s*)([A-Za-z_]\w*)\s*:/g, '$1"$2":')
 .replace(/,(\s*[}\]])/g, "$1");
@@ -759,8 +761,12 @@ function updateFromJson(value: string) {
 try {
 onEmbedChange(normalizeEmbed(JSON.parse(value)));
 setEditorError("");
-} catch {
-setEditorError("Invalid JSON. Fix syntax to update preview.");
+} catch (error) {
+setEditorError(
+`Invalid JSON: ${
+error instanceof Error ? error.message : "fix syntax to update preview."
+}`
+);
 }
 }
 
@@ -768,9 +774,11 @@ function updateFromJs(value: string) {
 try {
 onEmbedChange(parseDiscordJs(value));
 setEditorError("");
-} catch {
+} catch (error) {
 setEditorError(
-"Invalid discord.js snippet. Keep editing to update preview."
+`Invalid discord.js snippet: ${
+error instanceof Error ? error.message : "keep editing to update preview."
+}`
 );
 }
 }

@@ -32,6 +32,8 @@ function setAllDetails(open: boolean) {
 }
 
 const DAY_IN_MS = 86_400_000;
+const MIN_SERVER_DAYS_OLD = 200;
+const SERVER_AGE_RANDOM_RANGE_DAYS = 2200;
 const randomSeed = () => Math.floor(Math.random() * 1_000_000);
 const randomImage = (name: string, width: number, height: number) =>
 	`https://picsum.photos/seed/${name}-${randomSeed()}/${width}/${height}`;
@@ -61,7 +63,9 @@ const infoEmbed: Embed = {
 			name: "Created",
 			value: `<t:${Math.floor(
 				(Date.now() -
-					(Math.floor(Math.random() * 2200) + 200) * DAY_IN_MS) /
+					(Math.floor(Math.random() * SERVER_AGE_RANDOM_RANGE_DAYS) +
+						MIN_SERVER_DAYS_OLD) *
+						DAY_IN_MS) /
 					1000
 			)}:D>`,
 			inline: true
