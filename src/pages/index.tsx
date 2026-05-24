@@ -33,62 +33,48 @@ function setAllDetails(open: boolean) {
 
 const infoEmbed: Embed = {
 	author: {
-		name: "Info",
-		url: "https://example.com",
-		iconUrl: ""
+		name: "Server Stats",
+		url: "",
+		iconUrl: `https://picsum.photos/seed/guild-author-${Math.floor(
+			Math.random() * 1000000
+		)}/64/64`
 	},
-	title: "Example Title",
-	url: "https://example.com",
-	description: `This is an example description. Markdown works too!
-
-https://automatic.links
-> Block Quotes
-\`\`\`
-Code Blocks
-\`\`\`
-*Emphasis* or _emphasis_
-\`Inline code\` or \`\`inline code\`\`
-[Links](https://example.com)
-<@123>, <@!123>, <#123>, <@&123>, @here, @everyone mentions
-||Spoilers||
-~~Strikethrough~~
-**Strong**
-__Underline__`,
-	color: "#00b0f4",
+	title: "",
+	url: "",
+	description: "Here is a quick overview of the server.",
+	color: undefined,
 	fields: [
 		{
-			name: "Field Name",
-			value: "This is the field value.",
-			inline: false
-		},
-		{
-			name: "The first inline field.",
-			value: "This field is inline.",
+			name: "Members",
+			value: `${Math.floor(Math.random() * 90000) + 1000}`,
 			inline: true
 		},
 		{
-			name: "The second inline field.",
-			value: "Inline fields are stacked next to each other.",
+			name: "Boosts",
+			value: `${Math.floor(Math.random() * 180) + 1}`,
 			inline: true
 		},
 		{
-			name: "The third inline field.",
-			value: "You can have up to 3 inline fields in a row.",
-			inline: true
-		},
-		{
-			name: "Even if the next field is inline...",
-			value: "It won't stack with the previous inline fields.",
+			name: "Created",
+			value: `<t:${Math.floor(
+				(Date.now() -
+					(Math.floor(Math.random() * 2200) + 200) * 86400000) /
+					1000
+			)}:D>`,
 			inline: true
 		}
 	],
-	image: "https://cubedhuang.com/images/alex-knight-unsplash.webp",
-	thumbnail: "https://dan.onl/images/emptysong.jpg",
+	image: `https://picsum.photos/seed/guild-banner-${Math.floor(
+		Math.random() * 1000000
+	)}/640/256`,
+	thumbnail: `https://picsum.photos/seed/guild-thumb-${Math.floor(
+		Math.random() * 1000000
+	)}/128/128`,
 	footer: {
-		text: "Example Footer",
-		iconUrl: "https://slate.dan.onl/slate.png"
+		text: "",
+		iconUrl: ""
 	},
-	timestamp: Date.now()
+	timestamp: undefined
 };
 
 export default function Home() {
@@ -549,7 +535,13 @@ export default function Home() {
 			<div className="flex-1 bg-[#36393f] p-8">
 				<DiscordEmbed embed={embed} />
 
-				<Output embed={embed} />
+				<Output
+					embed={embed}
+					onEmbedChange={updatedEmbed => {
+						loadEmbed(updatedEmbed);
+						setError(undefined);
+					}}
+				/>
 			</div>
 
 			{modal ? (

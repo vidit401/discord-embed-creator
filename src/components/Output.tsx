@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import type { Embed } from "../lib/interfaces";
+import type { Embed, EmbedField } from "../lib/interfaces";
 import { embedToObjectCode } from "../lib/utils";
 import Highlight from "./Highlight";
 
@@ -17,12 +17,312 @@ function s(strings: TemplateStringsArray, ...values: unknown[]) {
 	return escaped;
 }
 
-export default function Output({ embed }: { embed: Embed }) {
+const sampleGuild = (() => {
+	const seed = Math.floor(Math.random() * 1000000);
+	const memberCount = Math.floor(Math.random() * 90000) + 1000;
+	const premiumSubscriptionCount = Math.floor(Math.random() * 180) + 1;
+	const createdTimestamp =
+		Date.now() - (Math.floor(Math.random() * 2200) + 200) * 86400000;
+
+	return {
+		memberCount,
+		premiumSubscriptionCount,
+		createdTimestamp,
+		iconURL: ({ size = 128 }: { size?: number } = {}) =>
+			`https://picsum.photos/seed/guild-icon-${seed}-${size}/${size}/${size}`
+	};
+})();
+
+function normalizeColor(value: unknown): string | undefined {
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return `#${Math.max(0, Math.min(value, 0xffffff))
+			.toString(16)
+			.padStart(6, "0")}`;
+	}
+
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	if (trimmed.startsWith("#")) return trimmed;
+	if (/^0x/i.test(trimmed)) {
+		const parsed = Number.parseInt(trimmed, 16);
+		if (Number.isFinite(parsed)) {
+			return `#${Math.max(0, Math.min(parsed, 0xffffff))
+				.toString(16)
+				.padStart(6, "0")}`;
+		}
+	}
+	return trimmed;
+}
+
+function readImageUrl(value: unknown): string {
+	if (typeof value === "string") return value;
+	if (
+		value &&
+		typeof value === "object" &&
+		"url" in value &&
+		typeof (value as { url?: unknown }).url === "string"
+	) {
+		return (value as { url: string }).url;
+	}
+	return "";
+}
+
+function normalizeFields(fields: unknown): EmbedField[] {
+	if (!Array.isArray(fields)) return [];
+
+	return fields
+		.map(field => {
+			if (Array.isArray(field)) {
+				return {
+					name: String(field[0] ?? ""),
+					value: String(field[1] ?? ""),
+					inline: !!field[2]
+				};
+			}
+
+			if (!field || typeof field !== "object") return null;
+			const maybeField = field as {
+				name?: unknown;
+				value?: unknown;
+				inline?: unknown;
+			};
+			return {
+				name: String(maybeField.name ?? ""),
+				value: String(maybeField.value ?? ""),
+				inline: !!maybeField.inline
+			};
+		})
+		.filter((field): field is EmbedField => !!field);
+}
+
+function normalizeEmbed(input: unknown): Embed {
+	const source =
+		input && typeof input === "object"
+			? (input as Record<string, unknown>)
+			: {};
+	const author =
+		source.author && typeof source.author === "object"
+			? (source.author as Record<string, unknown>)
+			: {};
+	const footer =
+		source.footer && typeof source.footer === "object"
+			? (source.footer as Record<string, unknown>)
+			: {};
+
+	const timestampSource = source.timestamp;
+	let timestamp: number | undefined;
+	if (typeof timestampSource === "number" && Number.isFinite(timestampSource)) {
+		timestamp = timestampSource;
+	} else if (timestampSource instanceof Date) {
+		timestamp = timestampSource.getTime();
+	} else if (typeof timestampSource === "string" && timestampSource.trim()) {
+		const parsed = Date.parse(timestampSource);
+		if (!Number.isNaN(parsed)) timestamp = parsed;
+	}
+
+	return {
+		title: String(source.title ?? ""),
+		description: String(source.description ?? ""),
+		url: String(source.url ?? ""),
+		timestamp,
+		color: normalizeColor(source.color),
+		image: readImageUrl(source.image),
+		thumbnail: readImageUrl(source.thumbnail),
+		footer: {
+			text: String(footer.text ?? ""),
+			iconUrl: String(footer.iconUrl ?? footer.icon_url ?? "")
+		},
+		author: {
+			name: String(author.name ?? ""),
+			url: String(author.url ?? ""),
+			iconUrl: String(author.iconUrl ?? author.icon_url ?? author.iconURL ?? "")
+		},
+		fields: normalizeFields(source.fields)
+	};
+}
+
+class MockEmbedBuilder {
+	data: Record<string, unknown> = {};
+
+	setAuthor(
+		nameOrAuthor: unknown,
+		iconURL?: unknown,
+		url?: unknown
+	): MockEmbedBuilder {
+		if (nameOrAuthor && typeof nameOrAuthor === "object") {
+			this.data.author = {
+				...(this.data.author as Record<string, unknown>),
+				...(nameOrAuthor as Record<string, unknown>)
+			};
+		} else {
+			this.data.author = {
+				name: nameOrAuthor,
+				iconURL,
+				url
+			};
+		}
+		return this;
+	}
+
+	setTitle(title: unknown): MockEmbedBuilder {
+		this.data.title = title;
+		return this;
+	}
+
+	setURL(url: unknown): MockEmbedBuilder {
+		this.data.url = url;
+		return this;
+	}
+
+	setDescription(description: unknown): MockEmbedBuilder {
+		this.data.description = description;
+		return this;
+	}
+
+	addField(
+		name: unknown,
+		value: unknown,
+		inline?: unknown
+	): MockEmbedBuilder {
+		const fields = (this.data.fields as unknown[]) || [];
+		fields.push({ name, value, inline: !!inline });
+		this.data.fields = fields;
+		return this;
+	}
+
+	addFields(...fields: unknown[]): MockEmbedBuilder {
+		const existing = (this.data.fields as unknown[]) || [];
+		const normalized: unknown[] = [];
+		for (const field of fields) {
+			if (Array.isArray(field)) normalized.push(...field);
+			else normalized.push(field);
+		}
+		this.data.fields = [...existing, ...normalized];
+		return this;
+	}
+
+	setImage(image: unknown): MockEmbedBuilder {
+		this.data.image = image;
+		return this;
+	}
+
+	setThumbnail(thumbnail: unknown): MockEmbedBuilder {
+		this.data.thumbnail = thumbnail;
+		return this;
+	}
+
+	setColor(color: unknown): MockEmbedBuilder {
+		this.data.color = color;
+		return this;
+	}
+
+	setFooter(
+		textOrFooter: unknown,
+		iconURL?: unknown
+	): MockEmbedBuilder {
+		if (textOrFooter && typeof textOrFooter === "object") {
+			this.data.footer = {
+				...(this.data.footer as Record<string, unknown>),
+				...(textOrFooter as Record<string, unknown>)
+			};
+		} else {
+			this.data.footer = { text: textOrFooter, iconURL };
+		}
+		return this;
+	}
+
+	setTimestamp(timestamp?: unknown): MockEmbedBuilder {
+		if (timestamp === undefined) {
+			this.data.timestamp = Date.now();
+			return this;
+		}
+		this.data.timestamp = timestamp;
+		return this;
+	}
+
+	toJSON(): unknown {
+		return this.data;
+	}
+}
+
+async function parseDiscordJs(code: string): Promise<Embed> {
+	const AsyncFunction: new (...args: string[]) => (
+		...args: unknown[]
+	) => Promise<unknown> = Object.getPrototypeOf(async function () {})
+		.constructor;
+
+	let repliedEmbed: unknown;
+
+	const runner = new AsyncFunction(
+		"defaultEmbed",
+		"EmbedBuilder",
+		"MessageEmbed",
+		"guild",
+		"message",
+		"Math",
+		"window",
+		"document",
+		"globalThis",
+		"fetch",
+		`${code}
+return typeof embed !== "undefined" ? embed : undefined;`
+	);
+
+	const message = {
+		reply: async (value: unknown) => {
+			if (
+				value &&
+				typeof value === "object" &&
+				"embeds" in value &&
+				Array.isArray((value as { embeds?: unknown[] }).embeds)
+			) {
+				repliedEmbed = (value as { embeds: unknown[] }).embeds[0];
+			}
+			return value;
+		}
+	};
+
+	const result = await runner(
+		() => new MockEmbedBuilder(),
+		MockEmbedBuilder,
+		MockEmbedBuilder,
+		sampleGuild,
+		message,
+		Math,
+		undefined,
+		undefined,
+		undefined,
+		undefined
+	);
+
+	const embedSource =
+		result && typeof result === "object" && "toJSON" in result
+			? (result as { toJSON: () => unknown }).toJSON()
+			: result || repliedEmbed;
+
+	if (!embedSource) {
+		throw new Error("No embed variable found in code.");
+	}
+
+	return normalizeEmbed(embedSource);
+}
+
+export default function Output({
+	embed,
+	onEmbedChange
+}: {
+	embed: Embed;
+	onEmbedChange: (embed: Embed) => void;
+}) {
 	const [language, setLanguage] = useState<"json" | "js" | "py" | "rs">("js");
 	const [jsVersion, setJsVersion] = useState("14");
 	const [jsMode, setJsMode] = useState("chained");
 	const [rsMode, setRsMode] = useState("variable"); // variable or closure
 	const [rsFields, setRsFields] = useState("together"); // together or separate
+	const [editorValue, setEditorValue] = useState("");
+	const [editorError, setEditorError] = useState("");
+	const parseVersion = useRef(0);
 
 	let output = "";
 
@@ -49,6 +349,39 @@ export default function Output({ embed }: { embed: Embed }) {
 
 				steps.push(substeps.join(jsMode === "chained" ? "\n  " : "\n"));
 			}
+
+			useEffect(() => {
+				setEditorValue(output);
+				setEditorError("");
+			}, [output, language, jsVersion, jsMode, rsMode, rsFields]);
+
+			function updateFromJson(value: string) {
+				try {
+					onEmbedChange(normalizeEmbed(JSON.parse(value)));
+					setEditorError("");
+				} catch {
+					setEditorError("Invalid JSON. Fix syntax to update preview.");
+				}
+			}
+
+			function updateFromJs(value: string) {
+				const current = ++parseVersion.current;
+
+				void parseDiscordJs(value)
+					.then(parsed => {
+						if (parseVersion.current !== current) return;
+						onEmbedChange(parsed);
+						setEditorError("");
+					})
+					.catch(() => {
+						if (parseVersion.current !== current) return;
+						setEditorError(
+							"Invalid discord.js snippet. Keep editing to update preview."
+						);
+					});
+			}
+
+			const editableWithPreview = language === "json" || language === "js";
 
 			if (embed.title) steps.push(s`.setTitle(${embed.title})`);
 
@@ -315,12 +648,34 @@ export default function Output({ embed }: { embed: Embed }) {
 				) : null}
 			</div>
 
-			<Highlight
-				language={language === "json" ? "js" : language}
-				className="rounded text-sm"
-			>
-				{output}
-			</Highlight>
+			{editableWithPreview ? (
+				<textarea
+					value={editorValue}
+					onChange={e => {
+						const value = e.target.value;
+						setEditorValue(value);
+						if (language === "json") updateFromJson(value);
+						else updateFromJs(value);
+					}}
+					spellCheck={false}
+					className="w-full min-h-[22rem] rounded text-sm p-4 bg-[#282c34] text-[#abb2bf] border border-[#202225] focus:outline-none focus:border-[#40444b]"
+					style={{
+						fontFamily:
+							'"Consolas","Andale Mono WT","Andale Mono","Lucida Console","Lucida Sans Typewriter","DejaVu Sans Mono","Bitstream Vera Sans Mono","Liberation Mono","Nimbus Mono L","Monaco","Courier New","Courier","monospace"'
+					}}
+				/>
+			) : (
+				<Highlight
+					language={language === "json" ? "js" : language}
+					className="rounded text-sm"
+				>
+					{output}
+				</Highlight>
+			)}
+
+			{editorError ? (
+				<p className="mt-2 text-sm text-[#fca5a5]">{editorError}</p>
+			) : null}
 		</div>
 	);
 }
